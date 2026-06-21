@@ -1,0 +1,11 @@
+# Datos (no versionar: pesados y/o regenerables)
+application_train.csv
+eight_columns.csv
+ext_source_missing_flags.csv
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+.venv/
+venv/
