@@ -2,6 +2,10 @@
 application_train.csv
 eight_columns.csv
 ext_source_missing_flags.csv
+HomeCredit_columns_description.csv
+
+*.png
+
 
 # Python
 __pycache__/
