@@ -38,6 +38,3 @@ class DebtRatioLayer(keras.layers.Layer):
 
     def compute_output_shape(self, input_shape):
         return (input_shape[0], input_shape[1] + 1)
-    
-
-    #Esto no va
