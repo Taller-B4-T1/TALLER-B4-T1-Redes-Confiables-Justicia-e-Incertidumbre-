@@ -6,7 +6,6 @@ Funciones de pérdida FAIR para el Taller B4-T1.
 La loss principal combina:
     BCE(y, y_pred)
     + lambda_pearson  * Pearson(y_pred, s)^2
-    + lambda_spearman * SoftSpearman(y_pred, s)^2
 
 Contrato de entrada:
     y_true[:, 0] = TARGET real
@@ -14,9 +13,6 @@ Contrato de entrada:
 
 Notas:
     - Pearson captura dependencia lineal.
-    - Spearman captura dependencia monótona, usando rangos.
-    - Como los rangos exactos no son diferenciables, Spearman se aproxima
-      mediante soft-ranks con sigmoides pareadas.
 """
 
 from __future__ import annotations
@@ -75,59 +71,9 @@ def pearson_corr(x, y, epsilon: float = _EPSILON):
     return numerator / (x_norm * y_norm + epsilon)
 
 
-def soft_rank(x, temperature: float = 0.05):
-    """
-    Aproximación diferenciable del ranking.
-
-    Para cada elemento x_i, estima cuántos elementos son menores que él:
-
-        rank_i ≈ 1 + sum_j sigmoid((x_i - x_j) / temperature)
-
-    Cuanto menor sea `temperature`, más se parece al ranking duro.
-    Cuanto mayor sea, más suave y estable es el gradiente.
-
-    Parameters
-    ----------
-    x:
-        Tensor de shape (batch,) o (batch, 1).
-    temperature:
-        Temperatura de suavizado. Valores típicos: 0.01, 0.05, 0.1.
-
-    Returns
-    -------
-    Tensor de shape (batch, 1):
-        Rangos suaves.
-    """
-    x = _as_column(x)
-
-    pairwise_diff = x - ops.transpose(x)
-    pairwise_comparisons = ops.sigmoid(pairwise_diff / temperature)
-
-    # Suma por fila: para cada muestra, cuántas quedan "por debajo" suavemente.
-    ranks = 1.0 + ops.sum(pairwise_comparisons, axis=1, keepdims=True)
-
-    return ranks
-
-
-def spearman_corr_soft(x, y, temperature: float = 0.05, epsilon: float = _EPSILON):
-    """
-    Correlación de Spearman diferenciable aproximada.
-
-    Spearman = Pearson(rank(x), rank(y)).
-
-    Como el ranking exacto no es diferenciable, usamos soft_rank.
-    """
-    x_rank = soft_rank(x, temperature=temperature)
-    y_rank = soft_rank(y, temperature=temperature)
-
-    return pearson_corr(x_rank, y_rank, epsilon=epsilon)
-
-
 @keras.saving.register_keras_serializable(package="b4t1")
 def make_fair_loss(
     lambda_pearson: float = 1.0,
-    lambda_spearman: float = 1.0,
-    spearman_temperature: float = 0.05,
     epsilon: float = _EPSILON,
 ) -> Callable:
     """
@@ -137,16 +83,11 @@ def make_fair_loss(
 
         BCE(y, y_pred)
         + lambda_pearson  * Pearson(y_pred, s)^2
-        + lambda_spearman * Spearman_soft(y_pred, s)^2
 
     Parameters
     ----------
     lambda_pearson:
         Peso del penalty de correlación lineal.
-    lambda_spearman:
-        Peso del penalty de correlación monótona.
-    spearman_temperature:
-        Temperatura para el ranking suave.
     epsilon:
         Constante de estabilidad numérica.
 
@@ -174,17 +115,7 @@ def make_fair_loss(
             epsilon=epsilon,
         )
 
-        rho_spearman = spearman_corr_soft(
-            y_pred,
-            s,
-            temperature=spearman_temperature,
-            epsilon=epsilon,
-        )
-
-        fairness_penalty = (
-            lambda_pearson * ops.square(rho_pearson)
-            + lambda_spearman * ops.square(rho_spearman)
-        )
+        fairness_penalty = lambda_pearson * ops.square(rho_pearson)
 
         return bce + fairness_penalty
 
@@ -194,7 +125,6 @@ def make_fair_loss(
 def fairness_metrics(
     y_true,
     y_pred,
-    spearman_temperature: float = 0.05,
     epsilon: float = _EPSILON,
 ) -> dict:
     """
@@ -209,16 +139,8 @@ def fairness_metrics(
     y_pred = _as_column(y_pred)
 
     rho_p = pearson_corr(y_pred, s, epsilon=epsilon)
-    rho_s = spearman_corr_soft(
-        y_pred,
-        s,
-        temperature=spearman_temperature,
-        epsilon=epsilon,
-    )
 
     return {
         "pearson": rho_p,
-        "spearman_soft": rho_s,
         "pearson_abs": ops.abs(rho_p),
-        "spearman_soft_abs": ops.abs(rho_s),
     }
