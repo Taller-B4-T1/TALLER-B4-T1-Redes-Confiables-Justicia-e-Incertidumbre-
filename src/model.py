@@ -2,7 +2,7 @@
 src/model.py — Taller B4-T1 (Diseño de Redes Confiables: Justicia e Incertidumbre)
 
 Responsabilidad única: construir y compilar el modelo principal y el espacio de 
-búsqueda de AutoML (Keras Tuner). No entrena, no evalúa, no guarda.
+búsqueda de AutoML (Keras Tuner). 
 """
 
 from __future__ import annotations
