@@ -10,9 +10,9 @@ CSV de origen: `application_train.csv`. El script SELECCIONA por nombre solo las
 columnas que usa; ignora las ~110 columnas restantes.
 
 Preprocesado por feature (spec acordado):
+  - AMT_CREDIT       : solo al canal custom (crudo). NO entra al canal denso.
   - AMT_INCOME_TOTAL : solo al canal custom (crudo). NO entra al canal denso.
-  - AMT_ANNUITY      : solo al canal custom (crudo). NO entra al canal denso.
-  - AMT_CREDIT       : log1p + RobustScaler   (canal denso únicamente)
+  - AMT_ANNUITY      : log1p + RobustScaler   (canal denso únicamente)
   - EXT_SOURCE_1/2/3 : imputación de NaN con la mediana de train (sin escalar;
                        ya vienen en ~[0,1]). Se generan además flags de
                        missingness ANTES de imputar.
@@ -24,11 +24,11 @@ Preprocesado por feature (spec acordado):
                        (ver nota al final del fichero).
 
 Routing en dos canales (arquitectura funcional de Jesús):
-  - Canal custom: alimenta la DebtRatioCustomLayer con AMT_ANNUITY y
+  - Canal custom: alimenta la DebtRatioCustomLayer con AMT_CREDIT y
     AMT_INCOME_TOTAL EN CRUDO (imputadas, sin escalar). La capa calcula el ratio
-    AMT_ANNUITY / AMT_INCOME_TOTAL y lo satura con tanh. Escalarlas antes
+    AMT_CREDIT / AMT_INCOME_TOTAL y lo satura con tanh. Escalarlas antes
     rompería la interpretación del ratio; el acotado lo hace la tanh.
-  - Canal denso: AMT_CREDIT, AGE, EXT_SOURCE_1/2/3, flags. Income y annuity
+  - Canal denso: AMT_ANNUITY, AGE, EXT_SOURCE_1/2/3, flags. Credit e income
     NO se repiten aquí; solo van al canal custom.
 
 Sin fuga de información: medianas de imputación y todos los scalers se ajustan
@@ -57,11 +57,11 @@ SENSITIVE_COL: str = "CODE_GENDER"
 AGE_SOURCE_COL: str = "DAYS_BIRTH"
 
 # Canal custom (EN CRUDO). ORDEN CONTRACTUAL: layers.py extrae por índice ->
-# 0 = numerador (annuity), 1 = denominador (income).
-CUSTOM_COLS: list[str] = ["AMT_ANNUITY", "AMT_INCOME_TOTAL"]
+# 0 = numerador (credit), 1 = denominador (income).
+CUSTOM_COLS: list[str] = ["AMT_CREDIT", "AMT_INCOME_TOTAL"]
 
 # Canal denso, por tratamiento de escalado.
-MONETARY_COLS: list[str] = ["AMT_CREDIT"]  # log1p + RobustScaler (income y annuity van solo al canal custom)
+MONETARY_COLS: list[str] = ["AMT_ANNUITY"]  # log1p + RobustScaler (credit e income van solo al canal custom)
 EXT_SOURCE_COLS: list[str] = ["EXT_SOURCE_1", "EXT_SOURCE_2", "EXT_SOURCE_3"]  # solo imputación
 
 
@@ -82,7 +82,7 @@ def _gender_binary(s_raw: pd.Series) -> np.ndarray:
 def _gender_onehot(s_raw: pd.Series) -> tuple[np.ndarray, list[str]]:
     """CODE_GENDER -> one-hot [CODE_GENDER_F, CODE_GENDER_M]. XNA -> [0, 0].
 
-    Solo se usa si include_gender_in_X=True (gerero como input del modelo).
+    Solo se usa si include_gender_in_X=True (género como input del modelo).
     """
     if pd.api.types.is_numeric_dtype(s_raw):
         g = s_raw.map({1: "M", 0: "F"}).astype(str)
@@ -106,7 +106,7 @@ def load_and_split(
     """Lee `application_train.csv`, imputa, escala y devuelve los arrays de los dos canales.
 
     Returns (en este orden):
-      X_custom_train, X_custom_val, X_custom_test : (N, 2) EN CRUDO  [annuity, income]
+      X_custom_train, X_custom_val, X_custom_test : (N, 2) EN CRUDO  [credit, income]
       X_dense_train,  X_dense_val,  X_dense_test  : (N, D) escalado + flags (+ género opc.)
       y_train, y_val, y_test : (N,)
       s_train, s_val, s_test : (N,)  variable sensible — NO entra al modelo
@@ -156,10 +156,10 @@ def load_and_split(
     Xi["AGE"] = Xi["AGE"].fillna(age_median)
 
     # --- Canal custom: CRUDO (imputado, sin escalar) --------------------- #
-    Xc = Xi[CUSTOM_COLS].to_numpy(dtype=np.float64)  # [annuity, income]
+    Xc = Xi[CUSTOM_COLS].to_numpy(dtype=np.float64)  # [credit, income]
 
     # --- Canal denso ----------------------------------------------------- #
-    # Monetarias: log1p + RobustScaler (RobustScaler ajustado solo en train).
+    # Monetaria: log1p + RobustScaler (RobustScaler ajustado solo en train).
     mono_log = np.log1p(Xi[MONETARY_COLS].to_numpy(dtype=np.float64))
     robust = RobustScaler().fit(mono_log[idx_train])
     mono_scaled = robust.transform(mono_log)
@@ -194,7 +194,7 @@ def load_and_split(
     scalers = {
         "medians": medians,
         "age_median": age_median,
-        "monetary_robust": robust,        # RobustScaler ajustado (sobre log1p)
+        "monetary_robust": robust,        # RobustScaler ajustado (sobre log1p de annuity)
         "monetary_cols": list(MONETARY_COLS),
         "age_scaler": age_scaler,
         "ext_source_cols": list(EXT_SOURCE_COLS),

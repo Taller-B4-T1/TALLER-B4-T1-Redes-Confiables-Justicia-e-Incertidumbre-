@@ -36,12 +36,12 @@ Alimenta la `DebtRatioCustomLayer`. Contiene exclusivamente las dos columnas que
 
 | Índice | Columna | Papel en el ratio |
 |---|---|---|
-| 0 | `AMT_ANNUITY` | numerador |
+| 0 | `AMT_CREDIT` | numerador |
 | 1 | `AMT_INCOME_TOTAL` | denominador |
 
-> **El orden es contractual.** `layers.py` extrae estas columnas por índice para calcular `AMT_ANNUITY / AMT_INCOME_TOTAL`. No reordenar sin coordinar con `layers.py`.
+> **El orden es contractual.** `layers.py` extrae estas columnas por índice para calcular `AMT_CREDIT / AMT_INCOME_TOTAL`. No reordenar sin coordinar con `layers.py`.
 
-**Por qué crudo y no escalado:** escalar income o annuity antes de la capa rompería la interpretación del ratio (`annuity / log1p(income)` no es un ratio de endeudamiento). El acotado del ratio lo realiza la saturación `tanh(ratio / k)` dentro de la capa, con `k` calibrado sobre la escala real del ratio (~0.05–0.5 en perfiles normales).
+**Por qué crudo y no escalado:** escalar credit o income antes de la capa rompería la interpretación del ratio (`credit / log1p(income)` no es un ratio de endeudamiento). El acotado del ratio lo realiza la saturación `tanh(ratio / k)` dentro de la capa, con `k` calibrado sobre la escala real del ratio. El ratio `AMT_CREDIT / AMT_INCOME_TOTAL` mide cuántas veces el crédito concedido supera la renta anual: vive del orden de unidades (típicamente ~1–10 en perfiles normales, con cola derecha larga). El valor exacto de `k` (p. ej. el percentil 95) se calibra en `01_eda`.
 
 ### Canal denso — `X_dense` (shape `(N, 8)`, o `(N, 10)` con género)
 
@@ -49,7 +49,7 @@ Recibe el resto de features ya escaladas, más los flags de imputación. Orden e
 
 | # | Columna | Tratamiento |
 |---|---|---|
-| 0 | `AMT_CREDIT` | `log1p` + `RobustScaler` |
+| 0 | `AMT_ANNUITY` | `log1p` + `RobustScaler` |
 | 1 | `AGE` | `StandardScaler` (derivada de `DAYS_BIRTH`) |
 | 2 | `EXT_SOURCE_1` | solo imputación (ya en ~[0,1]) |
 | 3 | `EXT_SOURCE_2` | solo imputación |
@@ -59,14 +59,14 @@ Recibe el resto de features ya escaladas, más los flags de imputación. Orden e
 | 7 | `is_imputed_EXT_SOURCE_3` | flag binario 0/1, sin escalar |
 | (8, 9) | `CODE_GENDER_F`, `CODE_GENDER_M` | one-hot, **solo si** `include_gender_in_X=True` |
 
-> **Income y annuity NO se repiten en el canal denso.** Solo viven en el canal custom. `AMT_CREDIT` es la única monetaria del canal denso.
+> **Credit e income NO se repiten en el canal denso.** Solo viven en el canal custom. `AMT_ANNUITY` es la única monetaria del canal denso.
 
 ---
 
 ## 4. Preprocesado por feature
 
-- **`AMT_ANNUITY`, `AMT_INCOME_TOTAL`** → imputación de NaN con la mediana de train; van crudas al canal custom.
-- **`AMT_CREDIT`** → `log1p` (comprime la cola alta sesgada) seguido de `RobustScaler` (centra por mediana/IQR, robusto a outliers). No se aplica clip explícito: la combinación `log1p` + `RobustScaler` ya controla los extremos.
+- **`AMT_CREDIT`, `AMT_INCOME_TOTAL`** → imputación de NaN con la mediana de train; van crudas al canal custom.
+- **`AMT_ANNUITY`** → `log1p` (comprime la cola alta sesgada) seguido de `RobustScaler` (centra por mediana/IQR, robusto a outliers). No se aplica clip explícito: la combinación `log1p` + `RobustScaler` ya controla los extremos. Es la única monetaria del canal denso.
 - **`AGE`** → se deriva de `DAYS_BIRTH` como `años = -DAYS_BIRTH / 365.25` y se escala con `StandardScaler`.
 - **`EXT_SOURCE_1/2/3`** → imputación de NaN con la mediana de train. No se escalan porque ya son puntuaciones normalizadas en ~[0,1].
 - **Flags de missingness** → para cada `EXT_SOURCE` se genera `is_imputed_EXT_SOURCE_x` = 1 si el valor era NaN antes de imputar, 0 si era real. Se calculan **antes** de imputar.
@@ -85,7 +85,7 @@ Las medianas de imputación, el `RobustScaler` y el `StandardScaler` se **ajusta
 Lee el CSV, imputa, escala y devuelve una tupla de **14 elementos** en este orden:
 
 ```
-X_custom_train, X_custom_val, X_custom_test,   # (N, 2)  crudo: [annuity, income]
+X_custom_train, X_custom_val, X_custom_test,   # (N, 2)  crudo: [credit, income]
 X_dense_train,  X_dense_val,  X_dense_test,    # (N, 8)  escalado + flags (+ género opcional)
 y_train, y_val, y_test,                        # (N,)    target
 s_train, s_val, s_test,                        # (N,)    variable sensible (NO entra al modelo)
@@ -123,8 +123,8 @@ Guarda todos los arrays procesados (los 12 primeros elementos de la tupla de `lo
 |---|---|---|
 | `medians` | `dict[str, float]` | medianas de imputación por columna (ajustadas en train) |
 | `age_median` | `float` | mediana de `AGE` para imputar (raro, por robustez) |
-| `monetary_robust` | `RobustScaler` | escalador de `AMT_CREDIT` (ajustado sobre `log1p`) |
-| `monetary_cols` | `list[str]` | columnas que pasan por el `RobustScaler` (`['AMT_CREDIT']`) |
+| `monetary_robust` | `RobustScaler` | escalador de `AMT_ANNUITY` (ajustado sobre `log1p`) |
+| `monetary_cols` | `list[str]` | columnas que pasan por el `RobustScaler` (`['AMT_ANNUITY']`) |
 | `age_scaler` | `StandardScaler` | escalador de `AGE` |
 | `ext_source_cols` | `list[str]` | columnas EXT_SOURCE (solo imputadas) |
 | `include_gender_in_X` | `bool` | si el género se incluyó como feature |
@@ -188,10 +188,11 @@ Imprime un resumen con las formas de cada array, la tasa de impago en train, la 
 
 ## 9. Decisiones de diseño relevantes
 
+- **Ratio de endeudamiento = `AMT_CREDIT / AMT_INCOME_TOTAL`.** El canal custom enruta credit (numerador) e income (denominador); `layers.py` calcula este cociente. Mide el apalancamiento del cliente (cuántas veces su renta anual es el crédito concedido). Es coherente y único entre `data.py` y `layers.py`.
 - **Variable sensible fuera de las features (por defecto).** `CODE_GENDER` no entra a ninguna `X`; solo viaja en `s` / `y_ext` para el penalty `λ·ρ(ŷ,s)²`. Es una divergencia consciente del material del curso (que recomienda darle el género al modelo y forzar independencia), priorizando la garantía dura de que el modelo nunca accede al género. El interruptor `include_gender_in_X` permite la opción contraria si se quiere reabrir esa decisión.
 - **Canal custom en crudo.** Las columnas del ratio entran sin escalar para preservar la interpretación del ratio de endeudamiento; la `tanh` se encarga del acotado.
 - **Flags de imputación como señal de incertidumbre.** Distinguir un `EXT_SOURCE` real de uno imputado es información clave para el modelo de incertidumbre (Pilar 4); por eso los flags se conservan como features del canal denso.
-- **Escalado heterogéneo a propósito.** `RobustScaler` para la monetaria sesgada, `StandardScaler` para la edad, nada para las puntuaciones ya normalizadas.
+- **Escalado heterogéneo a propósito.** `RobustScaler` para la monetaria sesgada (`AMT_ANNUITY`), `StandardScaler` para la edad, nada para las puntuaciones ya normalizadas.
 - **Reproducibilidad.** `SEED = 42` fijo; split estratificado; todos los ajustes solo en train.
 
 ---
