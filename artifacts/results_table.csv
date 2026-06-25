@@ -1,0 +1,3 @@
+modelo,AUC,Accuracy,rho_Pearson,rho2_Pearson
+base (lambda=0),0.7205,0.9193,0.036869,0.001359
+fair (lambda=0),0.7054,0.9193,0.002065,4e-06
